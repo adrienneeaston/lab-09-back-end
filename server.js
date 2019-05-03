@@ -252,7 +252,7 @@ function getMovies(request, response) {
         return superagent.get(url)
         .then(movieResults => {
         console.log('Movie in API');
-        if (!getMovies.body.results.length) { throw 'NO DATA'; }
+        if (!movieResults.body.results.length) { throw 'NO DATA'; }
           else {
             const movieSummaries = movieResults.body.results.map(movie => {
               let summary = new Movie(movie);
@@ -296,7 +296,7 @@ function Event(event) {
 function Movie(movie) {
   this.title = movie.original_title;
   this.overview = movie.overview.slice(0, 750);
-  this.average_votes = movies.votes_average;
+  this.average_votes = movie.votes_average;
   this.total_votes = movie.vote_count;
   this.image_url = `https://image.tmdb.org/t/p/original${movie.poster_path}` ;
   this.popularity = movie.popularity;
