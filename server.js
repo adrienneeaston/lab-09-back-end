@@ -235,6 +235,42 @@ function getEvents(request, response) {
     });
 }
 
+function getMovies(request, response) {
+  let sqlInfo = {
+    id: request.query.data.id,
+    endpoint: 'movie'
+  };
+
+  getDataFromDB(sqlInfo)
+    .then(data => checkTimeouts(sqlInfo, data))
+    .then(result => {
+      if (result) {response.send(result.row); }
+      else {
+        const url = `https://api.themoviedb.org/3/movie/76341?api_key=${MOVIE_API_KEY}&location.latitude=${request.query.data.latitude}&location.longitude=${request.query.data.longitude}`;
+
+        return superagent.get(url)
+        .then(eventResults => {
+        console.log('Movie in API');
+        if (!getMovies.body.movies.length) { throw 'NO DATA';}
+          else {
+            const movieSummaries = movieResults.body.movies.map(event => {
+              let summary = new Movie(movie);
+              summary.location_id = sqlInfo.id;
+
+              sqlInfo.columns = Object.keys(summary).join();
+              sqlInfo.values = Object.values(summary);
+
+              saveDataToDB(sqlInfo);
+              return summary;
+            });
+            response.send(movieSummaries);
+          }
+        })
+        .catch(error => handleError(error, response));
+      }
+    });
+}
+
 //DATA MODELS
 function Location(query, location) {
   this.search_query = query;
