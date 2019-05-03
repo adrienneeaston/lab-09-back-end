@@ -1,99 +1,241 @@
-'use strict'
+'use strict';
 
-// Load environment variables
+// PROVIDE ACCESS TO ENVIRONMENT VARIABLES IN .env
 require('dotenv').config();
 
-//Load express to do the heavey lifting -- Application dependencies
+// LOAD APPLICATION DEPENDENCIES
 const express = require('express');
+const cors = require('cors');
 const superagent = require('superagent');
-const cors = require('cors'); //Cross Origin Resource Sharing
-const pg = require('pg'); //postgress
+const pg = require('pg');
 
-//Application setup
+// APPLICATION SETUP
 const app = express();
-app.use(cors()); //tell express to use cors
+app.use(cors());
 const PORT = process.env.PORT;
 
-//connect to database
-const client = new pg.Client(process.env.DATABASE_URL); // part of posgres library
+//CONNECT TO DATABASE
+const client = new pg.Client(process.env.DATABASE_URL);
 client.connect();
 client.on('error', err => console.log(err));
 
-
-//Incoming API routes
-app.get('/testing', (request, response)=>{
-  response.send('<h1>HELLO WORLD..</h1>')
-
-});
-
-app.get('/location', searchToLatLong)
+// API ROUTES
+app.get('/location', searchToLatLong);
 app.get('/weather', getWeather);
-app.get('/events', getEvent);
+app.get('/events', getEvents);
 
-//server listening for requests
-app.listen(PORT, ()=>console.log(`city explorer back end Listening on PORT ${PORT}`));
+// TURN THE SERVER ON
+app.listen(PORT, () => console.log(`City Explorer Backend is up on ${PORT}`));
 
-//Helper Functions
+// ERROR HANDLER
+function handleError(err, res) {
+  console.error(err);
+  if (res) res.status(500).send('Sorry, something went wrong');
+}
 
-//refactor for SQL storage
-// 1. Need to check DB to see if location exists
-// 2. if it exists => get location from DB
-// 3. return infor to front
-// 4. if does not
-// 5. get location from API
-//6. run data through constructor
-//7. save to DB
-//8. add newly added location id to location object
-//9. return location to front
+// HELPER FUNCTIONS
 
+// DRY up our code
+// 1. Look for similar or duplicate code
+//    a. SQL SELECT to check for data in the DB
+//    b. SQL INSERT to data into the DB
 
+function getDataFromDB(sqlInfo) {
+  // Create a SQL Statement
+  let condition = '';
+  let values = [];
 
-function searchToLatLong(request, response){
-  let query = request.query.data;
+  if (sqlInfo.searchQuery) {
+    condition = 'search_query';
+    values = [sqlInfo.searchQuery];
+  } else {
+    condition = 'location_id';
+    values = [sqlInfo.id];
+  }
 
-  // define the search
+  let sql = `SELECT * FROM ${sqlInfo.endpoint}s WHERE ${condition}=$1;`;
 
-  let sql = `SELECT * FROM locations WHERE search_query=$1;`;
-  let values = [query]; //always array
-  console.log('line 67', sql, values);
+  // Get the Data and Return
+  try { return client.query(sql, values); }
+  catch (error) { handleError(error); }
+}
 
-  //make the query fo the database
-  client.query(sql, values)
-    .then (result => {
-      // did the db return any info?
-      console.log('result from Database', result.rowCount);
+function saveDataToDB(sqlInfo) {
+  // Create the parameter placeholders
+  let params = [];
+
+  for (let i = 1; i <= sqlInfo.values.length; i++) {
+    params.push(`$${i}`);
+  }
+
+  let sqlParams = params.join();
+
+  let sql = '';
+  if (sqlInfo.searchQuery) {
+    // location
+    sql = `INSERT INTO ${sqlInfo.endpoint}s (${sqlInfo.columns}) VALUES (${sqlParams}) RETURNING ID;`;
+  } else {
+    // all other endpoints
+    sql = `INSERT INTO ${sqlInfo.endpoint}s (${sqlInfo.columns}) VALUES (${sqlParams});`;
+  }
+
+  // save the data
+  try { return client.query(sql, sqlInfo.values); }
+  catch (err) { handleError(err); }
+}
+
+// CACHE INVALIDATION:
+
+// 1.	Get data from the DB
+// 2.	Check to see if the data is expired
+// a.	Expired => get new data from API, Save to DB, return
+// b.	Good => return existing data
+
+// Establish the length of time to keep data for each resource
+// NOTE: the names are singular so they can be dynamically used
+// The weather timeout MUST be 15 seconds for this lab. You can change
+// The others as you see fit... or not.
+
+// Check to see if the data is still valid
+function checkTimeouts(sqlInfo, sqlData) {
+
+  const timeouts = {
+    weather: 15 * 1000, // 15-seconds
+    yelp: 24 * 1000 * 60 * 60, // 24-Hours
+    movie: 30 * 1000 * 60 * 60 * 24, // 30-Days
+    event: 6 * 1000 * 60 * 60, // 6-Hours
+    trail: 7 * 1000 * 60 * 60 * 24 // 7-Days
+  };
+
+  // if there is data, find out how old it is.
+  if (sqlData.rowCount > 0) {
+    let ageOfResults = (Date.now() - sqlData.rows[0].created_at);
+
+    // For debugging only
+    console.log(sqlInfo.endpoint, ' AGE:', ageOfResults);
+    console.log(sqlInfo.endpoint, ' Timeout:', timeouts[sqlInfo.endpoint]);
+
+    // Compare the age of the results with the timeout value
+    // Delete the data if it is old
+    if (ageOfResults > timeouts[sqlInfo.endpoint]) {
+      let sql = `DELETE FROM ${sqlInfo.endpoint}s WHERE location_id=$1;`;
+      let values = [sqlInfo.id];
+      client.query(sql, values)
+        .then(() => { return null; })
+        .catch(error => handleError(error));
+    } else { return sqlData; }
+  }
+}
+
+function searchToLatLong(request, response) {
+  let sqlInfo = {
+    searchQuery: request.query.data,
+    endpoint: 'location'
+  };
+
+  getDataFromDB(sqlInfo)
+    .then(result => {
       if (result.rowCount > 0) {
         response.send(result.rows[0]);
-      }else {
-        console.log('results', result.rows);
-        //otherwise go get the data from the api
+      } else {
         const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${request.query.data}&key=${process.env.GEOCODE_API_KEY}`;
-        console.log(url);
+
         superagent.get(url)
-
-
           .then(result => {
-            if (!result.body.results.length) {throw 'NO DATA';}
+            if (!result.body.results.length) { throw 'NO DATA'; }
             else {
-              let location = new Location(query, result.body.results[0]);
-              let newSQL = `INSERT INTO locations (search_query, formatted_address, latitude, longitude) VALUES ($1, $2, $3, $4) RETURNING ID;`;
-              let newValues = Object.values(location);
+              let location = new Location(sqlInfo.searchQuery, result.body.results[0]);
 
-              client.query(newSQL, newValues)
-                .then( data => {
-                  //attach returnilng id to the location object
+              sqlInfo.columns = Object.keys(location).join();
+              sqlInfo.values = Object.values(location);
+
+              saveDataToDB(sqlInfo)
+                .then(data => {
                   location.id = data.rows[0].id;
                   response.send(location);
                 });
             }
           })
-          .catch(err => handleError(err, response));
+          .catch(error => handleError(error, response));
       }
-    })
+    });
 }
 
+function getWeather(request, response) {
 
-// Constructor for location data
+  let sqlInfo = {
+    id: request.query.data.id,
+    endpoint: 'weather'
+  };
+
+  getDataFromDB(sqlInfo)
+    .then(data => checkTimeouts(sqlInfo, data))
+    .then(result => {
+      if (result) { response.send(result.rows); }
+      else {
+        const url = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
+
+        return superagent.get(url)
+          .then(weatherResults => {
+            console.log('Weather from API');
+            if (!weatherResults.body.daily.data.length) { throw 'NO DATA'; }
+            else {
+              const weatherSummaries = weatherResults.body.daily.data.map(day => {
+                let summary = new Weather(day);
+                summary.location_id = sqlInfo.id;
+
+                sqlInfo.columns = Object.keys(summary).join();
+                sqlInfo.values = Object.values(summary);
+
+                saveDataToDB(sqlInfo);
+                return summary;
+              });
+              response.send(weatherSummaries);
+            }
+          })
+          .catch(error => handleError(error, response));
+      }
+    });
+}
+
+function getEvents(request, response) {
+  let sqlInfo = {
+    id: request.query.data.id,
+    endpoint: 'event'
+  };
+
+  getDataFromDB(sqlInfo)
+    .then(data => checkTimeouts(sqlInfo, data))
+    .then(result => {
+      if (result) { response.send(result.rows); }
+      else {
+         const url =`https://www.eventbriteapi.com/v3/events/search/?token=${process.env.EVENTBRITE_API_KEY}&location.latitude=${request.query.data.latitude}&location.longitude=${request.query.data.longitude}`;
+
+
+        return superagent.get(url)
+          .then(eventResults => {
+            console.log('Event from API');
+            if (!eventResults.body.events.length) { throw 'NO DATA'; }
+            else {
+              const eventSummaries = eventResults.body.map(event => {
+                let summary = new Event(event);
+                summary.location_id = sqlInfo.id;
+
+                sqlInfo.columns = Object.keys(summary).join();
+                sqlInfo.values = Object.values(summary);
+
+                saveDataToDB(sqlInfo);
+                return summary;
+              });
+              response.send(eventSummaries);
+            }
+          })
+          .catch(error => handleError(error, response));
+      }
+    });
+}
+
+//DATA MODELS
 function Location(query, location) {
   this.search_query = query;
   this.formatted_query = location.formatted_address;
@@ -101,72 +243,15 @@ function Location(query, location) {
   this.longitude = location.geometry.location.lng;
 }
 
-
-function getWeather(request, response) {
-  let query = request.query.data.id;
-  let sql = `SELECT * FROM weathers WHERE location_id=$1;`;
-  let values = [query]; //always array
-
-  client.query(sql, values)
-    .then (result => {
-      if (result.rowCount > 0) {
-        console.log('Weather from SQL');
-        response.send(result.rows);
-
-
-      } else {
-        const url = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
-
-        return superagent.get(url)
-          .then(weatherResults => {
-            console.log('weather from API');
-            if (!weatherResults.body.daily.data.length) { throw 'NO DATA'; }
-            else {
-              const weatherSummaries = weatherResults.body.daily.data.map( day => {
-                let summary = new Weather(day);
-                summary.id = query;
-
-                let newSql = `INSERT INTO weathers (forecast, time, location_id) VALUES($1, $2, $3);`;
-                let newValues = Object.values(summary);
-                console.log(newValues);
-                client.query(newSql, newValues);
-                return summary;
-              });
-              response.send(weatherSummaries);
-            }
-          })
-          .catch(err => handleError(err, response));
-      }
-    });
-}
-
 function Weather(day) {
   this.forecast = day.summary;
   this.time = new Date(day.time * 1000).toString().slice(0, 15);
-}
-
-function getEvent(request, response) {
-  //give url for Eventbrite API
-
-  const url = `https://www.eventbriteapi.com/v3/events/search/?token=${process.env.EVENTBRITE_API_KEY}&location.latitude=${request.query.data.latitude}&location.longitude=${request.query.data.longitude}`;
-  superagent.get(url)
-    .then(result => {
-      const eventSummaries = result.body.events.map(events => new Event(events));
-      console.log(eventSummaries)
-      response.send(eventSummaries);
-    })
-    .catch(err => handleError(err, response));
+  this.created_at = Date.now();
 }
 
 function Event(event) {
   this.link = event.url;
   this.name = event.name.text;
-  this.summary = event.summary;
   this.event_date = new Date(event.start.local).toString().slice(0, 15);
-}
-
-//error handler
-function handleError(err, response) {
-  console.log(err);
-  if (response) response.status(500).send('Sorry something went wrong');
+  this.summary = event.summary;
 }
