@@ -217,7 +217,7 @@ function getEvents(request, response) {
             console.log('Event from API');
             if (!eventResults.body.events.length) { throw 'NO DATA'; }
             else {
-              const eventSummaries = eventResults.body.map(event => {
+              const eventSummaries = eventResults.body.events.map(event => {
                 let summary = new Event(event);
                 summary.location_id = sqlInfo.id;
 
