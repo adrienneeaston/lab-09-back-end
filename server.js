@@ -23,6 +23,7 @@ client.on('error', err => console.log(err));
 app.get('/location', searchToLatLong);
 app.get('/weather', getWeather);
 app.get('/events', getEvents);
+app.get('/movies', getMovies);
 
 // TURN THE SERVER ON
 app.listen(PORT, () => console.log(`City Explorer Backend is up on ${PORT}`));
@@ -238,22 +239,20 @@ function getEvents(request, response) {
 function getMovies(request, response) {
   let sqlInfo = {
     id: request.query.data.id,
-    endpoint: 'movie'
+    endpoint: 'movies'
   };
 
   getDataFromDB(sqlInfo)
     .then(data => checkTimeouts(sqlInfo, data))
     .then(result => {
-      if (result) {response.send(result.row); }
+      if (result) { response.send(result.row); }
       else {
-        const url = `https://api.themoviedb.org/3/movie/76341?api_key=${MOVIE_API_KEY}&location.latitude=${request.query.data.latitude}&location.longitude=${request.query.data.longitude}`;
-
-        // const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.formatted_address.split(',')[0]}&page=1&include_adult=false`;
+        const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.formatted_address.split(',')[0]}&page=1&include_adult=false`;
 
         return superagent.get(url)
         .then(eventResults => {
         console.log('Movie in API');
-        if (!getMovies.body.results.length) { throw 'NO DATA';}
+        if (!getMovies.body.results.length) { throw 'NO DATA'; }
           else {
             const movieSummaries = movieResults.body.results.map(event => {
               let summary = new Movie(movie);
@@ -295,9 +294,17 @@ function Event(event) {
 }
 
 function Movie(movie) {
-  this.original_title = movie
-  this.overview = movie
+  this.title = movie.original_title;
+  this.overview = movie.overview.slice(0, 750);
+  this.average_votes = movies.votes_average;
+  this.total_votes = movie.vote_count;
+  this.image_url = `https://image.tmdb.org/t/p/original${movie.poster_path}` ;
+  this.popularity = movie.popularity;
+  this.released_on = movie.release_date;
+  this.created_at = Date.now();
 }
+
+// const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.formatted_address.split(',')[0]}&page=1&include_adult=false`;
 
 // function Movie (movie) {
 //   this.title = movie.original_title;
