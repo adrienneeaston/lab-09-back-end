@@ -248,12 +248,14 @@ function getMovies(request, response) {
       else {
         const url = `https://api.themoviedb.org/3/movie/76341?api_key=${MOVIE_API_KEY}&location.latitude=${request.query.data.latitude}&location.longitude=${request.query.data.longitude}`;
 
+        // const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.formatted_address.split(',')[0]}&page=1&include_adult=false`;
+
         return superagent.get(url)
         .then(eventResults => {
         console.log('Movie in API');
-        if (!getMovies.body.movies.length) { throw 'NO DATA';}
+        if (!getMovies.body.results.length) { throw 'NO DATA';}
           else {
-            const movieSummaries = movieResults.body.movies.map(event => {
+            const movieSummaries = movieResults.body.results.map(event => {
               let summary = new Movie(movie);
               summary.location_id = sqlInfo.id;
 
@@ -291,3 +293,19 @@ function Event(event) {
   this.event_date = new Date(event.start.local).toString().slice(0, 15);
   this.summary = event.summary;
 }
+
+function Movie(movie) {
+  this.original_title = movie
+  this.overview = movie
+}
+
+// function Movie (movie) {
+//   this.title = movie.original_title;
+//   this.overview = movie.overview.slice(0,750);
+//   this.average_votes = movie.vote_average;
+//   this.total_votes = movie.vote_count;
+//   this.image_url = `https://image.tmdb.org/t/p/original${movie.poster_path}` ;
+//   this.popularity = movie.popularity;
+//   this.released_on = movie.release_date;
+//   this.created_at = Date.now();
+// }
