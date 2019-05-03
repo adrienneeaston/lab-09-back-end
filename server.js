@@ -250,11 +250,11 @@ function getMovies(request, response) {
         const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.formatted_address.split(',')[0]}&page=1&include_adult=false`;
 
         return superagent.get(url)
-        .then(eventResults => {
+        .then(movieResults => {
         console.log('Movie in API');
         if (!getMovies.body.results.length) { throw 'NO DATA'; }
           else {
-            const movieSummaries = movieResults.body.results.map(event => {
+            const movieSummaries = movieResults.body.results.map(movie => {
               let summary = new Movie(movie);
               summary.location_id = sqlInfo.id;
 
