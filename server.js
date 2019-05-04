@@ -54,7 +54,7 @@ function getDataFromDB(sqlInfo) {
     values = [sqlInfo.id];
   }
 
-  let sql = `SELECT * FROM ${sqlInfo.endpoint}s WHERE ${condition}=$1;`;
+  let sql = `SELECT * FROM ${sqlInfo.endpoint} WHERE ${condition}=$1;`;
 
   // Get the Data and Return
   try { return client.query(sql, values); }
@@ -74,10 +74,10 @@ function saveDataToDB(sqlInfo) {
   let sql = '';
   if (sqlInfo.searchQuery) {
     // location
-    sql = `INSERT INTO ${sqlInfo.endpoint}s (${sqlInfo.columns}) VALUES (${sqlParams}) RETURNING ID;`;
+    sql = `INSERT INTO ${sqlInfo.endpoint} (${sqlInfo.columns}) VALUES (${sqlParams}) RETURNING ID;`;
   } else {
     // all other endpoints
-    sql = `INSERT INTO ${sqlInfo.endpoint}s (${sqlInfo.columns}) VALUES (${sqlParams});`;
+    sql = `INSERT INTO ${sqlInfo.endpoint} (${sqlInfo.columns}) VALUES (${sqlParams});`;
   }
 
   // save the data
@@ -119,7 +119,7 @@ function checkTimeouts(sqlInfo, sqlData) {
     // Compare the age of the results with the timeout value
     // Delete the data if it is old
     if (ageOfResults > timeouts[sqlInfo.endpoint]) {
-      let sql = `DELETE FROM ${sqlInfo.endpoint}s WHERE location_id=$1;`;
+      let sql = `DELETE FROM ${sqlInfo.endpoint} WHERE location_id=$1;`;
       let values = [sqlInfo.id];
       client.query(sql, values)
         .then(() => { return null; })
@@ -131,7 +131,7 @@ function checkTimeouts(sqlInfo, sqlData) {
 function searchToLatLong(request, response) {
   let sqlInfo = {
     searchQuery: request.query.data,
-    endpoint: 'location'
+    endpoint: 'locations'
   };
 
   getDataFromDB(sqlInfo)
@@ -166,7 +166,7 @@ function getWeather(request, response) {
 
   let sqlInfo = {
     id: request.query.data.id,
-    endpoint: 'weather'
+    endpoint: 'weathers'
   };
 
   getDataFromDB(sqlInfo)
@@ -202,7 +202,7 @@ function getWeather(request, response) {
 function getEvents(request, response) {
   let sqlInfo = {
     id: request.query.data.id,
-    endpoint: 'event'
+    endpoint: 'events'
   };
 
   getDataFromDB(sqlInfo)
@@ -247,7 +247,9 @@ function getMovies(request, response) {
     .then(result => {
       if (result) { response.send(result.row); }
       else {
-        const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.formatted_address.split(',')[0]}&page=1&include_adult=false`;
+        console.log('=================');
+        console.log(request.query);
+        const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.search_query}&page=1&include_adult=false`;
 
         return superagent.get(url)
         .then(movieResults => {
