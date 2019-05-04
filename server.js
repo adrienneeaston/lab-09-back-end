@@ -24,6 +24,7 @@ app.get('/location', searchToLatLong);
 app.get('/weather', getWeather);
 app.get('/events', getEvents);
 app.get('/movies', getMovies);
+app.get('/yelp', getYelp);
 
 // TURN THE SERVER ON
 app.listen(PORT, () => console.log(`City Explorer Backend is up on ${PORT}`));
@@ -274,6 +275,42 @@ function getMovies(request, response) {
     });
 }
 
+function getYelp (request, response) {
+  let sqlInfo = {
+    id: request.query.data.id,
+    endpoint: 'yelps'
+  };
+  getDataFromDB(sqlInfo)
+    .then(data => checkTimeouts(sqlInfo,data))
+    .then(result => {
+      if (result) {response.send(result.rows);}
+      else {
+        const url = `https://api.yelp.com/v3/businesses/search?latitude=${request.query.data.latitude}&longitude=${request.query.data.longitude}`;
+       
+        return superagent.get(url)
+          .set({'Authorization': 'Bearer '+ process.env.YELP_API_KEY})
+          .then(yelpResults => {
+            if (!yelpResults.body.businesses.length) { throw 'NO DATA'; }
+            else {
+              const yelpSummaries = yelpResults.body.businesses.map( biz => {
+                let summary = new Yelp(biz);
+                summary.location_id = sqlInfo.id;
+                console.log(summary);
+
+                sqlInfo.columns = Object.keys(summary).join();
+                sqlInfo.values = Object.values(summary);
+
+                saveDataToDB(sqlInfo);
+                return summary;
+              });
+              response.send(yelpSummaries);
+            }
+          })
+          .catch(err => handleError(err, response));
+      }
+    });
+}
+
 //DATA MODELS
 function Location(query, location) {
   this.search_query = query;
@@ -306,3 +343,11 @@ function Movie(movie) {
   this.created_at = Date.now();
 }
 
+function Yelp (yelp) {
+  this.name = yelp.name;
+  this.image_url = yelp.image_url;
+  this.price = yelp.price;
+  this.rating = yelp.rating;
+  this.url = yelp.url;
+  this.created_at = Date.now();
+}
