@@ -23,6 +23,8 @@ client.on('error', err => console.log(err));
 app.get('/location', searchToLatLong);
 app.get('/weather', getWeather);
 app.get('/events', getEvents);
+app.get('/movies', getMovies);
+app.get('/yelp', getYelp);
 
 // TURN THE SERVER ON
 app.listen(PORT, () => console.log(`City Explorer Backend is up on ${PORT}`));
@@ -53,7 +55,7 @@ function getDataFromDB(sqlInfo) {
     values = [sqlInfo.id];
   }
 
-  let sql = `SELECT * FROM ${sqlInfo.endpoint}s WHERE ${condition}=$1;`;
+  let sql = `SELECT * FROM ${sqlInfo.endpoint} WHERE ${condition}=$1;`;
 
   // Get the Data and Return
   try { return client.query(sql, values); }
@@ -73,10 +75,10 @@ function saveDataToDB(sqlInfo) {
   let sql = '';
   if (sqlInfo.searchQuery) {
     // location
-    sql = `INSERT INTO ${sqlInfo.endpoint}s (${sqlInfo.columns}) VALUES (${sqlParams}) RETURNING ID;`;
+    sql = `INSERT INTO ${sqlInfo.endpoint} (${sqlInfo.columns}) VALUES (${sqlParams}) RETURNING ID;`;
   } else {
     // all other endpoints
-    sql = `INSERT INTO ${sqlInfo.endpoint}s (${sqlInfo.columns}) VALUES (${sqlParams});`;
+    sql = `INSERT INTO ${sqlInfo.endpoint} (${sqlInfo.columns}) VALUES (${sqlParams});`;
   }
 
   // save the data
@@ -118,7 +120,7 @@ function checkTimeouts(sqlInfo, sqlData) {
     // Compare the age of the results with the timeout value
     // Delete the data if it is old
     if (ageOfResults > timeouts[sqlInfo.endpoint]) {
-      let sql = `DELETE FROM ${sqlInfo.endpoint}s WHERE location_id=$1;`;
+      let sql = `DELETE FROM ${sqlInfo.endpoint} WHERE location_id=$1;`;
       let values = [sqlInfo.id];
       client.query(sql, values)
         .then(() => { return null; })
@@ -130,7 +132,7 @@ function checkTimeouts(sqlInfo, sqlData) {
 function searchToLatLong(request, response) {
   let sqlInfo = {
     searchQuery: request.query.data,
-    endpoint: 'location'
+    endpoint: 'locations'
   };
 
   getDataFromDB(sqlInfo)
@@ -165,7 +167,7 @@ function getWeather(request, response) {
 
   let sqlInfo = {
     id: request.query.data.id,
-    endpoint: 'weather'
+    endpoint: 'weathers'
   };
 
   getDataFromDB(sqlInfo)
@@ -201,7 +203,7 @@ function getWeather(request, response) {
 function getEvents(request, response) {
   let sqlInfo = {
     id: request.query.data.id,
-    endpoint: 'event'
+    endpoint: 'events'
   };
 
   getDataFromDB(sqlInfo)
@@ -235,6 +237,80 @@ function getEvents(request, response) {
     });
 }
 
+function getMovies(request, response) {
+  let sqlInfo = {
+    id: request.query.data.id,
+    endpoint: 'movies'
+  };
+
+  getDataFromDB(sqlInfo)
+    .then(data => checkTimeouts(sqlInfo, data))
+    .then(result => {
+      if (result) { response.send(result.row); }
+      else {
+        console.log('=================');
+        console.log(request.query);
+        const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${request.query.data.search_query}&page=1&include_adult=false`;
+
+        return superagent.get(url)
+        .then(movieResults => {
+        console.log('Movie in API');
+        if (!movieResults.body.results.length) { throw 'NO DATA'; }
+          else {
+            const movieSummaries = movieResults.body.results.map(movie => {
+              let summary = new Movie(movie);
+              summary.location_id = sqlInfo.id;
+
+              sqlInfo.columns = Object.keys(summary).join();
+              sqlInfo.values = Object.values(summary);
+
+              saveDataToDB(sqlInfo);
+              return summary;
+            });
+            response.send(movieSummaries);
+          }
+        })
+        .catch(error => handleError(error, response));
+      }
+    });
+}
+
+function getYelp (request, response) {
+  let sqlInfo = {
+    id: request.query.data.id,
+    endpoint: 'yelps'
+  };
+  getDataFromDB(sqlInfo)
+    .then(data => checkTimeouts(sqlInfo,data))
+    .then(result => {
+      if (result) {response.send(result.rows);}
+      else {
+        const url = `https://api.yelp.com/v3/businesses/search?latitude=${request.query.data.latitude}&longitude=${request.query.data.longitude}`;
+       
+        return superagent.get(url)
+          .set({'Authorization': 'Bearer '+ process.env.YELP_API_KEY})
+          .then(yelpResults => {
+            if (!yelpResults.body.businesses.length) { throw 'NO DATA'; }
+            else {
+              const yelpSummaries = yelpResults.body.businesses.map( biz => {
+                let summary = new Yelp(biz);
+                summary.location_id = sqlInfo.id;
+                console.log(summary);
+
+                sqlInfo.columns = Object.keys(summary).join();
+                sqlInfo.values = Object.values(summary);
+
+                saveDataToDB(sqlInfo);
+                return summary;
+              });
+              response.send(yelpSummaries);
+            }
+          })
+          .catch(err => handleError(err, response));
+      }
+    });
+}
+
 //DATA MODELS
 function Location(query, location) {
   this.search_query = query;
@@ -254,4 +330,24 @@ function Event(event) {
   this.name = event.name.text;
   this.event_date = new Date(event.start.local).toString().slice(0, 15);
   this.summary = event.summary;
+}
+
+function Movie(movie) {
+  this.title = movie.original_title;
+  this.overview = movie.overview.slice(0, 750);
+  this.average_votes = movie.votes_average;
+  this.total_votes = movie.vote_count;
+  this.image_url = `https://image.tmdb.org/t/p/original${movie.poster_path}` ;
+  this.popularity = movie.popularity;
+  this.released_on = movie.release_date;
+  this.created_at = Date.now();
+}
+
+function Yelp (yelp) {
+  this.name = yelp.name;
+  this.image_url = yelp.image_url;
+  this.price = yelp.price;
+  this.rating = yelp.rating;
+  this.url = yelp.url;
+  this.created_at = Date.now();
 }
